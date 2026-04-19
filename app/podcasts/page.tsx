@@ -4,96 +4,87 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
+import { getProductErrorMessage } from "@/lib/errors";
 import Link from "next/link";
-
-interface Podcast {
-  id: string;
-  title: string;
-  description: string;
-  image_url: string;
-  created_at: string;
-}
+import Image from "next/image";
+import type { Podcast } from "@/lib/types";
 
 export default function PodcastsPage() {
   const router = useRouter();
-  const { session, loading: authLoading } = useAuth();
+  const { session, isReady } = useAuth();
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!authLoading && !session) {
+    if (!isReady) return;
+    if (!session) {
       router.push("/");
       return;
     }
 
-    if (session) {
-      fetchPodcasts();
-    }
-  }, [session, authLoading, router]);
+    const fetchPodcasts = async () => {
+      try {
+        setError("");
+        const { data, error } = await supabase
+          .from("podcasts")
+          .select("*")
+          .eq("user_id", session.user.id)
+          .order("created_at", { ascending: false });
 
-  const fetchPodcasts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("podcasts")
-        .select("*")
-        .eq("user_id", session?.user.id)
-        .order("created_at", { ascending: false });
+        if (error) throw error;
+        setPodcasts((data || []) as Podcast[]);
+      } catch (err: unknown) {
+        setError(getProductErrorMessage(err, "Could not load podcasts."));
+      } finally {
+        setLoading(false);
+      }
+    };
 
-      if (error) throw error;
-      setPodcasts(data || []);
-    } catch (err) {
-      console.error("Error fetching podcasts:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    fetchPodcasts();
+  }, [session, isReady, router]);
 
-  if (authLoading || loading) {
+  if (!isReady || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen page-shell flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading podcasts...</p>
+          <div className="loader mx-auto mb-4" />
+          <p className="text-muted">Loading podcasts...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-6 flex justify-between items-center">
+    <div className="page-shell min-h-screen p-6 md:p-10">
+      <div className="container-wide space-y-6">
+        <div className="flex justify-between items-center gap-4 flex-wrap">
           <div>
-            <Link href="/dashboard" className="text-blue-600 hover:text-blue-800">
+            <Link href="/dashboard" className="inline-link">
               ← Dashboard
             </Link>
-            <h1 className="text-3xl font-bold text-gray-900 mt-2">My Podcasts</h1>
+            <h1 className="text-4xl font-semibold tracking-tight mt-2">My Podcasts</h1>
           </div>
-          <Link
-            href="/podcasts/new"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
-          >
+          <Link href="/podcasts/new" className="btn-primary">
             + Create Podcast
           </Link>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 py-10">
+        {error ? (
+          <div className="notice-error">
+            <p>{error}</p>
+            <Link href="/setup-status" className="inline-link mt-2 inline-block">
+              Open Setup Status →
+            </Link>
+          </div>
+        ) : null}
+
         {podcasts.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg shadow">
+          <div className="card-elevated text-center py-12 px-6">
             <div className="text-4xl mb-4">📻</div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
-              No podcasts yet
-            </h2>
-            <p className="text-gray-600 mb-6">
-              Create your first podcast to get started!
-            </p>
-            <Link
-              href="/podcasts/new"
-              className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
-            >
+            <h2 className="text-xl font-semibold mb-2">No podcasts yet</h2>
+            <p className="text-muted mb-6">Create your first podcast to get started.</p>
+            <Link href="/podcasts/new" className="btn-primary inline-flex">
               Create First Podcast
             </Link>
           </div>
@@ -103,27 +94,24 @@ export default function PodcastsPage() {
               <Link
                 key={podcast.id}
                 href={`/podcasts/${podcast.id}`}
-                className="bg-white rounded-lg shadow hover:shadow-lg transition p-6 cursor-pointer"
+                className="card-elevated p-6 card-hover"
               >
                 {podcast.image_url && (
-                  <div className="w-full h-40 bg-gray-200 rounded-lg mb-4 overflow-hidden">
-                    <img
+                  <div className="w-full h-40 bg-panel-2 rounded-lg mb-4 overflow-hidden">
+                    <Image
                       src={podcast.image_url}
                       alt={podcast.title}
+                      width={640}
+                      height={280}
                       className="w-full h-full object-cover"
                     />
                   </div>
                 )}
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  {podcast.title}
-                </h3>
-                <p className="text-gray-600 text-sm line-clamp-2">
+                <h3 className="text-xl font-semibold mb-2">{podcast.title}</h3>
+                <p className="text-muted text-sm line-clamp-2">
                   {podcast.description || "No description"}
                 </p>
-                <div className="mt-4 text-xs text-gray-500">
-                  Created{" "}
-                  {new Date(podcast.created_at).toLocaleDateString()}
-                </div>
+                <div className="mt-4 text-xs text-muted">Created {new Date(podcast.created_at).toLocaleDateString()}</div>
               </Link>
             ))}
           </div>

@@ -1,53 +1,71 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
+import { getProductErrorMessage } from "@/lib/errors";
 import Link from "next/link";
+import type { PodcastSummary } from "@/lib/types";
 
 export default function NewEpisodePage() {
   const router = useRouter();
-  const { session } = useAuth();
+  const { session, isReady } = useAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [episodeNumber, setEpisodeNumber] = useState(1);
+  const [duration, setDuration] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [podcasts, setPodcasts] = useState<any[]>([]);
+  const [podcasts, setPodcasts] = useState<PodcastSummary[]>([]);
   const [selectedPodcast, setSelectedPodcast] = useState("");
   const [podcastsLoading, setPodcastsLoading] = useState(true);
 
-  // Fetch podcasts on mount
-  useState(() => {
+  useEffect(() => {
+    if (!isReady) return;
+    if (!session?.user.id) {
+      router.push("/");
+      return;
+    }
+
     const fetchPodcasts = async () => {
       try {
         const { data, error } = await supabase
           .from("podcasts")
           .select("id, title")
-          .eq("user_id", session?.user.id);
+          .eq("user_id", session.user.id)
+          .order("created_at", { ascending: false });
 
         if (error) throw error;
-        setPodcasts(data || []);
+        const list = (data || []) as PodcastSummary[];
+        setPodcasts(list);
         if (data && data.length > 0) {
           setSelectedPodcast(data[0].id);
         }
-      } catch (err) {
-        console.error("Error fetching podcasts:", err);
+      } catch {
+        setError("Could not load your podcasts.");
       } finally {
         setPodcastsLoading(false);
       }
     };
 
-    if (session?.user.id) {
-      fetchPodcasts();
-    }
-  });
+    fetchPodcasts();
+  }, [session, isReady, router]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!session?.user.id) {
+      setError("You must be signed in to create episodes.");
+      return;
+    }
+
     if (!title || !selectedPodcast) {
       setError("Title and podcast are required");
+      return;
+    }
+
+    if (episodeNumber <= 0) {
+      setError("Episode number must be greater than zero.");
       return;
     }
 
@@ -59,61 +77,53 @@ export default function NewEpisodePage() {
         .from("episodes")
         .insert({
           podcast_id: selectedPodcast,
-          title,
-          description,
+          title: title.trim(),
+          description: description.trim() || null,
           episode_number: episodeNumber,
+          duration_seconds: duration > 0 ? duration : null,
         });
 
       if (err) throw err;
 
       router.push("/episodes");
-    } catch (err: any) {
-      setError(err.message || "Error creating episode");
+    } catch (err: unknown) {
+      setError(getProductErrorMessage(err, "Error creating episode"));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow">
-        <div className="max-w-4xl mx-auto px-4 py-6">
-          <Link
-            href="/episodes"
-            className="text-blue-600 hover:text-blue-800 mb-4 block"
-          >
+    <div className="page-shell min-h-screen p-6 md:p-10">
+      <div className="container-narrow space-y-6">
+        <div>
+          <Link href="/episodes" className="inline-link mb-4 inline-block">
             ← Back to Episodes
           </Link>
-          <h1 className="text-3xl font-bold text-gray-900">Upload New Episode</h1>
+          <h1 className="text-4xl font-semibold tracking-tight">Create Episode</h1>
         </div>
-      </div>
 
-      {/* Form */}
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <div className="bg-white rounded-lg shadow p-8">
+        <div className="card-elevated p-8">
           {podcastsLoading ? (
-            <p className="text-gray-600">Loading podcasts...</p>
+            <div className="flex items-center gap-3 text-muted">
+              <div className="loader" />
+              <p>Loading podcasts...</p>
+            </div>
           ) : podcasts.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-gray-600 mb-4">No podcasts found.</p>
-              <Link
-                href="/podcasts/new"
-                className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
-              >
+              <p className="text-muted mb-4">No podcasts found.</p>
+              <Link href="/podcasts/new" className="btn-primary inline-flex">
                 Create Podcast First
               </Link>
             </div>
           ) : (
             <form onSubmit={handleCreate} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Podcast *
-                </label>
+                <label className="label">Podcast</label>
                 <select
                   value={selectedPodcast}
                   onChange={(e) => setSelectedPodcast(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input"
                   disabled={loading}
                 >
                   {podcasts.map((podcast) => (
@@ -125,64 +135,67 @@ export default function NewEpisodePage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Episode Number
-                </label>
+                <label className="label">Episode Number</label>
                 <input
                   type="number"
+                  min={1}
                   value={episodeNumber}
-                  onChange={(e) => setEpisodeNumber(parseInt(e.target.value))}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => setEpisodeNumber(Number(e.target.value))}
+                  className="input"
                   disabled={loading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Episode Title *
-                </label>
+                <label className="label">Duration (seconds)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  className="input"
+                  disabled={loading}
+                />
+              </div>
+
+              <div>
+                <label className="label">Episode Title</label>
                 <input
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Episode title"
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input"
                   disabled={loading}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description
-                </label>
+                <label className="label">Description</label>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What's this episode about?"
                   rows={5}
-                  className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input min-h-28"
                   disabled={loading}
                 />
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg">
-                  {error}
+                <div className="notice-error">
+                  <p>{error}</p>
+                  <Link href="/setup-status" className="inline-link mt-2 inline-block">
+                    Open Setup Status →
+                  </Link>
                 </div>
               )}
 
               <div className="flex gap-4">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-semibold"
-                >
+                <button type="submit" disabled={loading} className="btn-primary">
                   {loading ? "Creating..." : "Create Episode"}
                 </button>
-                <Link
-                  href="/episodes"
-                  className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-6 py-2 rounded-lg font-semibold"
-                >
+                <Link href="/episodes" className="btn-ghost">
                   Cancel
                 </Link>
               </div>
@@ -193,3 +206,4 @@ export default function NewEpisodePage() {
     </div>
   );
 }
+

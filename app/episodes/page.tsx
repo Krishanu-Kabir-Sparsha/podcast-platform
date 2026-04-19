@@ -1,62 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { supabase } from "@/lib/supabase";
+import { getProductErrorMessage } from "@/lib/errors";
 import Link from "next/link";
-
-interface Episode {
-  id: string;
-  title: string;
-  description: string;
-  duration_seconds: number;
-  episode_number: number;
-  created_at: string;
-  podcast_id: string;
-}
+import type { Episode, PodcastSummary } from "@/lib/types";
 
 export default function EpisodesPage() {
   const router = useRouter();
-  const { session, loading: authLoading } = useAuth();
+  const { session, isReady } = useAuth();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPodcast, setSelectedPodcast] = useState<string | null>(null);
-  const [podcasts, setPodcasts] = useState<any[]>([]);
+  const [podcasts, setPodcasts] = useState<PodcastSummary[]>([]);
+  const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (!authLoading && !session) {
-      router.push("/");
-      return;
-    }
-
-    if (session) {
-      fetchPodcasts();
-    }
-  }, [session, authLoading, router]);
-
-  const fetchPodcasts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("podcasts")
-        .select("id, title")
-        .eq("user_id", session?.user.id);
-
-      if (error) throw error;
-      setPodcasts(data || []);
-      if (data && data.length > 0) {
-        setSelectedPodcast(data[0].id);
-        fetchEpisodes(data[0].id);
-      } else {
-        setLoading(false);
-      }
-    } catch (err) {
-      console.error("Error fetching podcasts:", err);
-      setLoading(false);
-    }
-  };
-
-  const fetchEpisodes = async (podcastId: string) => {
+  const fetchEpisodes = useCallback(async (podcastId: string) => {
     try {
       const { data, error } = await supabase
         .from("episodes")
@@ -65,61 +26,101 @@ export default function EpisodesPage() {
         .order("episode_number", { ascending: false });
 
       if (error) throw error;
-      setEpisodes(data || []);
-    } catch (err) {
-      console.error("Error fetching episodes:", err);
+      setEpisodes((data || []) as Episode[]);
+    } catch (err: unknown) {
+      setError(getProductErrorMessage(err, "Could not load episodes."));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const fetchPodcasts = useCallback(async (userId: string) => {
+    try {
+      setError("");
+      const { data, error } = await supabase
+        .from("podcasts")
+        .select("id, title")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      const list = (data || []) as PodcastSummary[];
+      setPodcasts(list);
+      if (list.length > 0) {
+        setSelectedPodcast(list[0].id);
+        fetchEpisodes(list[0].id);
+      } else {
+        setLoading(false);
+      }
+    } catch (err: unknown) {
+      setError(getProductErrorMessage(err, "Could not load podcasts."));
+      setLoading(false);
+    }
+  }, [fetchEpisodes]);
+
+  useEffect(() => {
+    if (!isReady) return;
+    if (!session) {
+      router.push("/");
+      return;
+    }
+
+    fetchPodcasts(session.user.id);
+  }, [session, isReady, router, fetchPodcasts]);
 
   const handlePodcastChange = (podcastId: string) => {
+    setLoading(true);
     setSelectedPodcast(podcastId);
     fetchEpisodes(podcastId);
   };
 
+  if (!isReady) {
+    return (
+      <div className="min-h-screen page-shell flex items-center justify-center">
+        <div className="loader" />
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 py-6 flex justify-between items-center">
+    <div className="page-shell min-h-screen p-6 md:p-10">
+      <div className="container-wide space-y-6">
+        <div className="flex justify-between items-center gap-4 flex-wrap">
           <div>
-            <Link href="/dashboard" className="text-blue-600 hover:text-blue-800">
+            <Link href="/dashboard" className="inline-link">
               ← Dashboard
             </Link>
-            <h1 className="text-3xl font-bold text-gray-900 mt-2">Episodes</h1>
+            <h1 className="text-4xl font-semibold tracking-tight mt-2">Episodes</h1>
           </div>
-          <Link
-            href="/episodes/new"
-            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
-          >
+          <Link href="/episodes/new" className="btn-primary">
             + Upload Episode
           </Link>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="max-w-7xl mx-auto px-4 py-10">
+        {error ? (
+          <div className="notice-error">
+            <p>{error}</p>
+            <Link href="/setup-status" className="inline-link mt-2 inline-block">
+              Open Setup Status →
+            </Link>
+          </div>
+        ) : null}
+
         {podcasts.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg shadow">
-            <p className="text-gray-600 mb-4">No podcasts found. Create one first!</p>
-            <Link
-              href="/podcasts/new"
-              className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
-            >
+          <div className="card-elevated text-center py-12 px-6">
+            <p className="text-muted mb-4">No podcasts found. Create one first.</p>
+            <Link href="/podcasts/new" className="btn-primary inline-flex">
               Create Podcast
             </Link>
           </div>
         ) : (
           <>
-            <div className="mb-8">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Select Podcast
-              </label>
+            <div className="card-elevated p-5 mb-8">
+              <label className="label">Select Podcast</label>
               <select
                 value={selectedPodcast || ""}
                 onChange={(e) => handlePodcastChange(e.target.value)}
-                className="w-full max-w-xs border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="input max-w-md"
               >
                 {podcasts.map((podcast) => (
                   <option key={podcast.id} value={podcast.id}>
@@ -131,41 +132,27 @@ export default function EpisodesPage() {
 
             {loading ? (
               <div className="text-center py-12">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-                <p className="text-gray-600">Loading episodes...</p>
+                <div className="loader mx-auto mb-4" />
+                <p className="text-muted">Loading episodes...</p>
               </div>
             ) : episodes.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-lg shadow">
+              <div className="card-elevated text-center py-12 px-6">
                 <div className="text-4xl mb-4">🎙️</div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                  No episodes yet
-                </h2>
-                <p className="text-gray-600 mb-6">
-                  Upload your first episode to get started!
-                </p>
-                <Link
-                  href="/episodes/new"
-                  className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold"
-                >
+                <h2 className="text-xl font-semibold mb-2">No episodes yet</h2>
+                <p className="text-muted mb-6">Upload your first episode to get started.</p>
+                <Link href="/episodes/new" className="btn-primary inline-flex">
                   Upload Episode
                 </Link>
               </div>
             ) : (
               <div className="space-y-4">
                 {episodes.map((episode) => (
-                  <div
-                    key={episode.id}
-                    className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition"
-                  >
+                  <div key={episode.id} className="card-elevated p-6 card-hover">
                     <div className="flex justify-between items-start">
                       <div>
-                        <h3 className="text-lg font-semibold text-gray-900">
-                          Episode {episode.episode_number}: {episode.title}
-                        </h3>
-                        <p className="text-gray-600 mt-2">
-                          {episode.description}
-                        </p>
-                        <div className="mt-2 flex gap-4 text-sm text-gray-500">
+                        <h3 className="text-lg font-semibold">Episode {episode.episode_number}: {episode.title}</h3>
+                        <p className="text-muted mt-2">{episode.description || "No description"}</p>
+                        <div className="mt-2 flex gap-4 text-sm text-muted">
                           <span>
                             {episode.duration_seconds
                               ? `${Math.floor(
@@ -175,9 +162,7 @@ export default function EpisodesPage() {
                                 ).padStart(2, "0")}`
                               : "Duration unknown"}
                           </span>
-                          <span>
-                            {new Date(episode.created_at).toLocaleDateString()}
-                          </span>
+                          <span>{new Date(episode.created_at).toLocaleDateString()}</span>
                         </div>
                       </div>
                     </div>

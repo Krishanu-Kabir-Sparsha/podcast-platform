@@ -7,7 +7,7 @@ import { getErrorMessage } from "@/lib/errors";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-export default function SignupPage() {
+export default function LoginPage() {
   const router = useRouter();
   const { session, isReady } = useAuth();
 
@@ -16,7 +16,6 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [cooldown, setCooldown] = useState<number | null>(null);
 
   useEffect(() => {
     if (isReady && session) {
@@ -24,23 +23,7 @@ export default function SignupPage() {
     }
   }, [session, isReady, router]);
 
-  useEffect(() => {
-    if (!cooldown || cooldown <= 0) return;
-
-    const timer = setInterval(() => {
-      setCooldown((prev) => {
-        if (!prev || prev <= 1) {
-          clearInterval(timer);
-          return null;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [cooldown]);
-
-  const handleSignup = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!email || !password) {
@@ -48,47 +31,30 @@ export default function SignupPage() {
       return;
     }
 
-    if (password.length < 6) {
-      setErrorMessage("Password must be at least 6 characters.");
-      return;
-    }
-
     setLoading(true);
     setErrorMessage("");
     setSuccessMessage("");
-    setCooldown(null);
 
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
-        const lower = error.message.toLowerCase();
-        const secondsMatch = error.message.match(/after\s+(\d+)\s+seconds/i);
-        if (secondsMatch?.[1]) {
-          setCooldown(Number(secondsMatch[1]));
-        }
-
-        if (lower.includes("rate limit")) {
-          setErrorMessage(
-            "Too many signup attempts. Please wait a moment or sign in with an existing account."
-          );
-        } else {
-          setErrorMessage(error.message);
-        }
+        setErrorMessage(error.message);
         return;
       }
 
-      if (data.session || data.user) {
-        setSuccessMessage("Account created. Redirecting to dashboard...");
+      if (data.user) {
+        setSuccessMessage("Signed in successfully. Redirecting...");
+
         setTimeout(() => {
           router.push("/dashboard");
-        }, 900);
+        }, 700);
       }
     } catch (err: unknown) {
-      setErrorMessage(getErrorMessage(err, "Unexpected signup failure."));
+      setErrorMessage(getErrorMessage(err, "Unexpected sign-in failure."));
     } finally {
       setLoading(false);
     }
@@ -109,14 +75,12 @@ export default function SignupPage() {
     <div className="min-h-screen page-shell flex items-center justify-center p-4">
       <div className="w-full max-w-md card-elevated p-8">
         <div className="mb-8">
-          <p className="chip mb-3">Launch Studio</p>
-          <h1 className="text-4xl font-semibold tracking-tight mb-2">
-            Podcast Platform
-          </h1>
-          <p className="text-muted">Create your creator account</p>
+          <p className="chip mb-3">Creator Access</p>
+          <h1 className="text-4xl font-semibold tracking-tight mb-2">Welcome Back</h1>
+          <p className="text-muted">Sign in to continue building your show</p>
         </div>
 
-        <form onSubmit={handleSignup} className="space-y-4">
+        <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="label">Email</label>
             <input
@@ -135,7 +99,7 @@ export default function SignupPage() {
             <input
               type="password"
               className="input"
-              placeholder="At least 6 characters"
+              placeholder="Your account password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
@@ -148,36 +112,26 @@ export default function SignupPage() {
           ) : null}
 
           {errorMessage ? (
-            <div className="notice-error">
-              <p>{errorMessage}</p>
-              {cooldown ? (
-                <p className="mt-1">Try again in {cooldown}s.</p>
-              ) : null}
-              <p className="mt-1">
-                Already have an account? <Link href="/login" className="inline-link">Sign in</Link>
-              </p>
-            </div>
+            <div className="notice-error">{errorMessage}</div>
           ) : null}
 
-          <button type="submit" disabled={loading || !!cooldown} className="btn-primary w-full mt-2">
-            {loading ? "Creating account..." : cooldown ? `Wait ${cooldown}s` : "Sign Up"}
+          <button type="submit" disabled={loading} className="btn-primary w-full mt-2">
+            {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
         <div className="mt-6 pt-6 border-t border-line">
           <p className="text-sm text-muted text-center">
-            Already have an account?{" "}
-            <Link href="/login" className="inline-link font-semibold">
-              Sign in here
+            New here?{" "}
+            <Link href="/" className="inline-link font-semibold">
+              Create account
             </Link>
           </p>
         </div>
 
         <div className="mt-4 panel-subtle text-xs space-y-1">
-          <p className="font-semibold">Quick notes</p>
-          <p>- Signup may be temporarily rate-limited after repeated attempts.</p>
-          <p>- Use the login page for repeated testing workflows.</p>
-          <p>- Data persists in your Supabase project tables.</p>
+          <p className="font-semibold">Tip</p>
+          <p>If signup is rate-limited, wait for cooldown and use this login page for repeat testing.</p>
         </div>
       </div>
     </div>
